@@ -220,7 +220,7 @@ def create_nerf(args):
 
     start = 0
     basedir = args.basedir
-    expname = args.expname
+    expname = args.expname+time_str
 
     ##########################
 
@@ -640,7 +640,7 @@ def train():
 
     # Create log dir and copy the config file
     basedir = args.basedir
-    expname = args.expname
+    expname = args.expname+time_str
     os.makedirs(os.path.join(basedir, expname), exist_ok=True)
     f = os.path.join(basedir, expname, 'args.txt')
     with open(f, 'w') as file:
