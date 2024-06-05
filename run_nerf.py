@@ -1,4 +1,6 @@
 import os, sys
+from datetime import datetime
+
 import numpy as np
 import imageio
 import json
@@ -217,7 +219,7 @@ def create_nerf(args):
 
     start = 0
     basedir = args.basedir
-    expname = args.expname
+    expname = args.expname+time_str
 
     ##########################
 
@@ -486,9 +488,9 @@ def config_parser():
                         help='learning rate')
     parser.add_argument("--lrate_decay", type=int, default=250, 
                         help='exponential learning rate decay (in 1000 steps)')
-    parser.add_argument("--chunk", type=int, default=1024*16,
+    parser.add_argument("--chunk", type=int, default=1024*8,
                         help='number of rays processed in parallel, decrease if running out of memory')
-    parser.add_argument("--netchunk", type=int, default=1024*32,
+    parser.add_argument("--netchunk", type=int, default=1024*16,
                         help='number of pts sent through network in parallel, decrease if running out of memory')
     parser.add_argument("--no_reload", action='store_true', 
                         help='do not reload weights from saved ckpt')
@@ -564,7 +566,7 @@ def config_parser():
 
     # configs for ActiveNeRF
     parser.add_argument("--i_all",   type=int, default=5000) # Training iterations, 500000 for full-res nerfs
-    parser.add_argument('--active_iter', type=int, nargs='+', default=[10, 2000, 3000, 4000]) # Iterations for active learning
+    parser.add_argument('--active_iter', type=int, nargs='+', default=[1000,2000,3000,4000]) # Iterations for active learning
     parser.add_argument("--init_image",   type=int, default=10) # initial number of images, only for llff dataset
     parser.add_argument("--choose_k",   type=int, default=4) # The number of new captured data for each active iter
     parser.add_argument("--beta_min",   type=float, default=0.01) # Minimun value for uncertainty
@@ -1283,8 +1285,8 @@ def config_parser():
 
     # configs for ActiveNeRF
     parser.add_argument("--i_all",   type=int, default=5000) # Training iterations, 500000 for full-res nerfs
-    parser.add_argument('--active_iter', type=int, nargs='+', default=[10, 2000, 3000, 4000]) # Iterations for active learning
-    parser.add_argument("--init_image",   type=int, default=10) # initial number of images, only for llff dataset
+    parser.add_argument('--active_iter', type=int, nargs='+', default=[1000, 2000, 3000, 4000]) # Iterations for active learning
+    parser.add_argument("--init_image",   type=int, default=20) # initial number of images, only for llff dataset
     parser.add_argument("--choose_k",   type=int, default=4) # The number of new captured data for each active iter
     parser.add_argument("--beta_min",   type=float, default=0.01) # Minimun value for uncertainty
     parser.add_argument("--w",   type=float, default=0.01) # Strength for regularization as in Eq.(11)
@@ -1443,46 +1445,70 @@ def train():
     print('TEST views are', i_test)
     print('VAL views are', i_val)
     # 将 i_holdout 以 20个为一组
-    i_holdout = [i_holdout[i:i + 20] for i in range(0, len(i_holdout), 20)]
-    i_holdout=i_holdout[0]
     start = start + 1
-    for i in trange(start, N_iters):
+    isActive=False
+    i_holdout_list = [i_holdout[i:i + 20] for i in range(0, len(i_holdout), 20)]
+    index_holdout = 0
 
-        # active evaluation
-        # if i in args.active_iter:
-        #     print('start evaluation:')
-        #     print('get rays')
-        #     rays = np.stack([get_rays_np(H, W, focal, p) for p in poses.cpu().numpy()[:,:3,:4]], 0) # [N, ro+rd, H, W, 3]
-        #     print('done, concats')
-        #
-        #     # get all holdout rays (candidate)
-        #     rays_rgb_all = torch.cat([torch.tensor(rays).to(device), images[:,None]], 1) # [N, ro+rd+rgb, H, W, 3]
-        #     rays_rgb_all = rays_rgb_all.permute(0,2,3,1,4) # [N, H, W, ro+rd+rgb, 3]
-        #
-        #     rays_rgb_holdout = torch.cat([rays_rgb_all[j, ::args.ds_rate, ::args.ds_rate] for j in i_holdout[:20]], 0)
-        #     rays_rgb_holdout = torch.reshape(rays_rgb_holdout, [-1,3,3]) # [(N-1)*H*W, ro+rd+rgb, 3]
-        #     rays_rgb_holdout = torch.transpose(rays_rgb_holdout, 0, 1)
-        #     batch_rays = rays_rgb_holdout[:2]
-        #
-        #     print('before evaluation:', i_train, i_holdout)
-        #     # capture new rays
-        #     args.choose_k=5
-        #     hold_out_index = choose_new_k(H//args.ds_rate, W//args.ds_rate, focal, batch_rays, args.choose_k, **render_kwargs_test)
-        #     i_train = np.append(i_train, i_holdout[hold_out_index])
-        #     i_holdout = np.delete(i_holdout, hold_out_index)
-        #     print('after evaluation:', i_train, i_holdout, hold_out_index)
-        #
-        #     # update training rays
-        #     rays_rgb_train = torch.stack([rays_rgb_all[i] for i in i_train], 0) # train images only
-        #     rays_rgb_train = torch.reshape(rays_rgb_train, [-1,3,3]) # [(N-1)*H*W, ro+rd+rgb, 3]
-        #
-        #     print('shuffle rays')
-        #     np.random.shuffle(rays_rgb_train)
-        #
-        #     f = os.path.join(basedir, expname, 'args.txt')
-        #     with open(f, 'a') as file:
-        #         file.write(str(i_train))
-        #         file.write(str(i_holdout))
+    for i in trange(start, N_iters):
+        if i % 1000==0:
+            # active evaluation
+            if isActive:
+                print('start evaluation:')
+                print('get rays')
+                rays = np.stack([get_rays_np(H, W, focal, p) for p in poses.cpu().numpy()[:,:3,:4]], 0) # [N, ro+rd, H, W, 3]
+                print('done, concats')
+            
+                # get all holdout rays (candidate)
+                rays_rgb_all = torch.cat([torch.tensor(rays).to(device), images[:,None]], 1) # [N, ro+rd+rgb, H, W, 3]
+                rays_rgb_all = rays_rgb_all.permute(0,2,3,1,4) # [N, H, W, ro+rd+rgb, 3]
+            
+                rays_rgb_holdout = torch.cat([rays_rgb_all[j, ::args.ds_rate, ::args.ds_rate] for j in i_holdout[:20]], 0)
+                rays_rgb_holdout = torch.reshape(rays_rgb_holdout, [-1,3,3]) # [(N-1)*H*W, ro+rd+rgb, 3]
+                rays_rgb_holdout = torch.transpose(rays_rgb_holdout, 0, 1)
+                batch_rays = rays_rgb_holdout[:2]
+            
+                print('before evaluation:', i_train, i_holdout)
+                # capture new rays
+                args.choose_k=5
+                hold_out_index = choose_new_k(H//args.ds_rate, W//args.ds_rate, focal, batch_rays, args.choose_k, **render_kwargs_test)
+                i_train = np.append(i_train, i_holdout[hold_out_index])
+                i_holdout = np.delete(i_holdout, hold_out_index)
+                print('after evaluation:', i_train, i_holdout, hold_out_index)
+            
+                # update training rays
+                rays_rgb_train = torch.stack([rays_rgb_all[i] for i in i_train], 0) # train images only
+                rays_rgb_train = torch.reshape(rays_rgb_train, [-1,3,3]) # [(N-1)*H*W, ro+rd+rgb, 3]
+            
+                print('shuffle rays')
+                np.random.shuffle(rays_rgb_train)
+            
+                f = os.path.join(basedir, expname, 'args.txt')
+                with open(f, 'a') as file:
+                    file.write(str(i_train))
+                    file.write(str(i_holdout))
+            else:
+                # 从 holdout 数据集中每隔五张选一张加入 train 数据集
+                if index_holdout < len(i_holdout_list):
+                    current_holdout = i_holdout_list[index_holdout]
+                    index_holdout += 1
+
+                    hold_out_index = list(range(0, len(current_holdout), 5))
+                    # 添加最后一个索引
+                    hold_out_index.append(len(current_holdout) - 1)
+                    i_train = np.append(i_train, current_holdout[hold_out_index])
+
+                    print('After evaluation:', i_train, current_holdout, hold_out_index)
+                    print('Shuffle rays')
+                    # np.random.shuffle(rays_rgb_train)
+                    indices = np.arange(len(rays_rgb_train))
+                    np.random.shuffle(indices)
+                    rays_rgb_train = rays_rgb_train[indices]
+
+                    f = os.path.join(basedir, expname, 'args.txt')
+                    with open(f, 'a') as file:
+                        file.write(str(i_train))
+                        file.write(str(i_holdout))
 
         time0 = time.time()
 
@@ -1500,8 +1526,7 @@ def train():
 
         ########  Core optimization loop  ########
         rgb, disp, acc, uncert, alpha, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
-                                                verbose=i < 10, retraw=True,
-                                                **render_kwargs_train)
+                                                verbose=i < 10, retraw=True, **render_kwargs_train)
 
         optimizer.zero_grad()
         if uncert.min() > 0:
@@ -1548,7 +1573,7 @@ def train():
             print('Saved checkpoints at', path)
 
 
-        if i%args.i_video==0 and i > 0:
+        if i%args.i_video==0 and i > 0 and False:
             # Turn on testing mode
             with torch.no_grad():
                 rgbs, disps, uncerts, alphas = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
@@ -1557,8 +1582,8 @@ def train():
             imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
             imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
             imageio.mimwrite(moviebase + 'uncert.mp4', to8b(uncerts / np.max(uncerts)), fps=30, quality=8)
-
-        if i%args.i_testset==0 and i > 0:
+ 
+        if i%args.i_testset==0 and i > 0 and False:
             testsavedir = os.path.join(basedir, expname, 'testset_{:06d}'.format(i))
             os.makedirs(testsavedir, exist_ok=True)
             print('test poses shape', poses[i_test].shape)
@@ -1586,8 +1611,7 @@ def train():
                 target = images[img_i]
                 pose = poses[img_i, :3,:4]
                 with torch.no_grad():
-                    rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, c2w=pose,
-                                                        **render_kwargs_test)
+                    rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, c2w=pose, **render_kwargs_test)
 
                 psnr = mse2psnr(img2mse(rgb, target))
 
@@ -1607,11 +1631,15 @@ def train():
                         tf.summary.image('disp0', extras['disp0'][tf.newaxis,...,tf.newaxis], step=i)
                         tf.summary.image('z_std', extras['z_std'][tf.newaxis,...,tf.newaxis], step=i)
 
+
+
         global_step += 1
 
 if __name__=='__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    current_time = datetime.now()
+    time_str = current_time.strftime("%m%d_%H%M")
 
     parser = config_parser()
     args = parser.parse_args()
