@@ -16,7 +16,7 @@
                 "--expname",
                 "active_lego",
                 "--basedir",
-                "./logs",
+                "./runs",
                 "--datadir",
                 "./data/nerf_synthetic/lego"
             ]

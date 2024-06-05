@@ -1,5 +1,5 @@
 expname = fern_test
-basedir = ./logs
+basedir = ./runs
 datadir = ./data/nerf_llff_data/fern
 dataset_type = llff
 

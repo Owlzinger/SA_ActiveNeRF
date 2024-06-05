@@ -1,4 +1,6 @@
 import os, sys
+# os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+
 from datetime import datetime
 
 import numpy as np
@@ -12,7 +14,6 @@ import torch.nn.functional as F
 from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
-import tensorflow as tf
 
 from run_nerf_helpers import *
 
@@ -219,7 +220,7 @@ def create_nerf(args):
 
     start = 0
     basedir = args.basedir
-    expname = args.expname+time_str
+    expname = args.expname
 
     ##########################
 
@@ -273,6 +274,7 @@ def create_nerf(args):
     render_kwargs_test['raw_noise_std'] = 0.
 
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, i_train, i_holdout
+
 
 
 def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False):
@@ -555,7 +557,7 @@ def config_parser():
     # logging/saving options
     parser.add_argument("--i_print",   type=int, default=100, 
                         help='frequency of console printout and metric loggin')
-    parser.add_argument("--i_img",     type=int, default=500, 
+    parser.add_argument("--i_img",     type=int, default=100, 
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=10000, 
                         help='frequency of weight ckpt saving')
@@ -724,9 +726,10 @@ def train():
     print('VAL views are', i_val)
 
     start = start + 1
-    isActive=False
+    isActive=True
     i_holdout_list = [i_holdout[i:i + 20] for i in range(0, len(i_holdout), 20)]
     index_holdout = 0
+    writer = SummaryWriter()
 
     for i in trange(start, N_iters):
 
@@ -884,13 +887,12 @@ def train():
             print(expname, i, psnr.cpu().item(), loss.cpu().item(), global_step)
             print('iter time {:.05f}'.format(dt))
 
-            with writer.as_default():
-                tf.summary.scalar('loss', loss.cpu().item(),step=i)
-                tf.summary.scalar('psnr', psnr.cpu().item(),step=i)
+            writer.add_scalar('loss', loss.cpu().item(),global_step=i)
+            writer.add_scalar('psnr', psnr.cpu().item(),global_step=i)
 
-                #tf.summary.histogram('tran', trans,step=i)
-                if args.N_importance > 0:
-                    tf.summary.scalar('psnr0', psnr0.cpu().item(),step=i)
+            #tf.summary.histogram('tran', trans,step=i)
+            if args.N_importance > 0:
+                writer.add_scalar('psnr0', psnr0.cpu().item(),global_step=i)
 
         if i%args.i_img==0:
 
@@ -914,7 +916,7 @@ def train():
             #     tf.summary.image('disp', disp[tf.newaxis,...,tf.newaxis], step=i)
             #     tf.summary.image('acc', acc[tf.newaxis,...,tf.newaxis], step=i)
 
-            #     tf.summary.scalar('psnr_holdout', psnr.cpu().item(), step=i)
+            #     writer.add_scalar('psnr_holdout', psnr.cpu().item(), step=i)
             #     tf.summary.image('rgb_holdout', target[tf.newaxis], step=i)
                 #   if args.N_importance > 0:
 
@@ -925,9 +927,9 @@ def train():
             print(expname,"[Evaluation] img_i: ", img_i, "val_PSNR: ",evl_psnr.cpu().item(), "val_loss",evl_loss.cpu().item(), global_step)
 
 
-            with writer.as_default():
-                tf.summary.scalar('val_loss', evl_loss.cpu().item(),step=i)
-                tf.summary.scalar('val_psnr', evl_psnr.cpu().item(),step=i)
+
+            writer.add_scalar('val_loss', evl_loss.cpu().item(),global_step=i)
+            writer.add_scalar('val_psnr', evl_psnr.cpu().item(),global_step=i)
 
             # 将 loss 和 psnr 保存到文件中
             f = os.path.join(basedir, expname, 'evl_metric.txt')
@@ -937,6 +939,8 @@ def train():
 
 
         global_step += 1
+    writer.close()
+
 
 if __name__=='__main__':
     from torch.cuda.amp import autocast, GradScaler
