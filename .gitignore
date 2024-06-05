@@ -4,3 +4,4 @@ logs
 *.png
 *.JPG
 .DS_Store
+data/nerf_llff_data/fern

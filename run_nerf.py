@@ -18,7 +18,7 @@ from load_llff import load_llff_data
 from load_blender import load_blender_data
 import warnings
 
-# from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 warnings.filterwarnings('ignore')
 
@@ -1432,6 +1432,9 @@ def train():
 
     rays_rgb_train = torch.Tensor(rays_rgb_train).to(device)
 
+    writer = tf.summary.create_file_writer(
+        os.path.join(basedir, 'summaries', expname))
+    # writer.set_as_default()
 
     N_iters = args.i_all + 1
     print('Begin')
@@ -1508,6 +1511,7 @@ def train():
 
         loss = img_loss
         psnr = mse2psnr(img2mse(rgb, target_s))
+        trans = extras['raw'][..., -1]
 
         if 'rgb0' in extras:
             img_loss0 = img2mse(extras['rgb0'], target_s)
@@ -1561,19 +1565,18 @@ def train():
             with torch.no_grad():
                 render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
             print('Saved test set')
-
         if i%args.i_print==0:
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
+            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.cpu().item()}  PSNR: {psnr.cpu().item()}")
 
-            print(expname, i, psnr.item(), loss.item(), global_step)
+            print(expname, i, psnr.cpu().item(), loss.cpu().item(), global_step)
             print('iter time {:.05f}'.format(dt))
 
-            with tf.contrib.summary.record_summaries_every_n_global_steps(args.i_print):
-                tf.contrib.summary.scalar('loss', loss)
-                tf.contrib.summary.scalar('psnr', psnr)
-                tf.contrib.summary.histogram('tran', trans)
+            with writer.as_default():
+                tf.summary.scalar('loss', loss.cpu().item(),step=i)
+                tf.summary.scalar('psnr', psnr.cpu().item(),step=i)
+                #tf.summary.histogram('tran', trans,step=i)
                 if args.N_importance > 0:
-                    tf.contrib.summary.scalar('psnr0', psnr0)
+                    tf.summary.scalar('psnr0', psnr0.cpu().item(),step=i)
 
 
             if i%args.i_img==0:
@@ -1588,157 +1591,28 @@ def train():
 
                 psnr = mse2psnr(img2mse(rgb, target))
 
-                with tf.contrib.summary.record_summaries_every_n_global_steps(args.i_img):
+                with writer.as_default():
+                    tf.summary.image('rgb', to8b(rgb)[tf.newaxis], step=i)
+                    tf.summary.image('disp', disp[tf.newaxis,...,tf.newaxis], step=i)
+                    tf.summary.image('acc', acc[tf.newaxis,...,tf.newaxis], step=i)
 
-                    tf.contrib.summary.image('rgb', to8b(rgb)[tf.newaxis])
-                    tf.contrib.summary.image('disp', disp[tf.newaxis,...,tf.newaxis])
-                    tf.contrib.summary.image('acc', acc[tf.newaxis,...,tf.newaxis])
-
-                    tf.contrib.summary.scalar('psnr_holdout', psnr)
-                    tf.contrib.summary.image('rgb_holdout', target[tf.newaxis])
+                    tf.summary.scalar('psnr_holdout', psnr.cpu().item(), step=i)
+                    tf.summary.image('rgb_holdout', target[tf.newaxis], step=i)
 
 
                 if args.N_importance > 0:
 
-                    with tf.contrib.summary.record_summaries_every_n_global_steps(args.i_img):
-                        tf.contrib.summary.image('rgb0', to8b(extras['rgb0'])[tf.newaxis])
-                        tf.contrib.summary.image('disp0', extras['disp0'][tf.newaxis,...,tf.newaxis])
-                        tf.contrib.summary.image('z_std', extras['z_std'][tf.newaxis,...,tf.newaxis])
+                    with writer.as_default():
+                        tf.summary.image('rgb0', to8b(extras['rgb0'])[tf.newaxis], step=i)
+                        tf.summary.image('disp0', extras['disp0'][tf.newaxis,...,tf.newaxis], step=i)
+                        tf.summary.image('z_std', extras['z_std'][tf.newaxis,...,tf.newaxis], step=i)
 
         global_step += 1
 
 if __name__=='__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')
-    parser = config_parser()
-    args = parser.parse_args()
-    train()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    start = start + 1
-    for i in trange(start, N_iters):
-
-        # active evaluation
-        if i in args.active_iter:
-            print('start evaluation:')
-            print('get rays')
-            rays = np.stack([get_rays_np(H, W, focal, p) for p in poses.cpu().numpy()[:,:3,:4]], 0) # [N, ro+rd, H, W, 3]
-            print('done, concats')
-
-            # get all holdout rays (candidate)
-            rays_rgb_all = torch.cat([torch.tensor(rays).to(device), images[:,None]], 1) # [N, ro+rd+rgb, H, W, 3]
-            rays_rgb_all = rays_rgb_all.permute(0,2,3,1,4) # [N, H, W, ro+rd+rgb, 3]
-
-            rays_rgb_holdout = torch.cat([rays_rgb_all[j, ::args.ds_rate, ::args.ds_rate] for j in i_holdout[:20]], 0)
-            rays_rgb_holdout = torch.reshape(rays_rgb_holdout, [-1,3,3]) # [(N-1)*H*W, ro+rd+rgb, 3]
-            rays_rgb_holdout = torch.transpose(rays_rgb_holdout, 0, 1)
-            batch_rays = rays_rgb_holdout[:2]
-
-            print('before evaluation:', i_train, i_holdout)
-            # capture new rays
-            hold_out_index = choose_new_k(H//args.ds_rate, W//args.ds_rate, focal, batch_rays, args.choose_k, **render_kwargs_test)
-            i_train = np.append(i_train, i_holdout[hold_out_index])
-            i_holdout = np.delete(i_holdout, hold_out_index)
-            print('after evaluation:', i_train, i_holdout, hold_out_index)
-
-            # update training rays
-            rays_rgb_train = torch.stack([rays_rgb_all[i] for i in i_train], 0) # train images only
-            rays_rgb_train = torch.reshape(rays_rgb_train, [-1,3,3]) # [(N-1)*H*W, ro+rd+rgb, 3]
-
-            print('shuffle rays')
-            np.random.shuffle(rays_rgb_train)
-
-            f = os.path.join(basedir, expname, 'args.txt')
-            with open(f, 'a') as file:
-                file.write(str(i_train))
-                file.write(str(i_holdout))
-
-        time0 = time.time()
-
-        # Sample random ray batch
-        batch = rays_rgb_train[i_batch:i_batch+N_rand] # [B, 2+1, 3*?]
-        batch = torch.transpose(batch, 0, 1)
-        batch_rays, target_s = batch[:2], batch[2]
-
-        i_batch += N_rand
-        if i_batch >= rays_rgb_train.shape[0]:
-            print("Shuffle data after an epoch!")
-            rand_idx = torch.randperm(rays_rgb_train.shape[0])
-            rays_rgb_train = rays_rgb_train[rand_idx]
-            i_batch = 0
-
-        #####  Core optimization loop  #####
-        rgb, disp, acc, uncert, alpha, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays,
-                                                verbose=i < 10, retraw=True,
-                                                **render_kwargs_train)
-
-        optimizer.zero_grad()
-        if uncert.min() > 0:
-            img_loss = img2mse_uncert_alpha(rgb, target_s, uncert, alpha, args.w)
-        else:
-            img_loss = img2mse(rgb, target_s)
-
-        loss = img_loss
-        psnr = mse2psnr(img2mse(rgb, target_s))
-
-        if 'rgb0' in extras:
-            img_loss0 = img2mse(extras['rgb0'], target_s)
-            loss = loss + img_loss0
-            psnr0 = mse2psnr(img2mse(extras['rgb0'], target_s))
-
-        loss.backward()
-        optimizer.step()
-
-        # NOTE: IMPORTANT!
-        ###   update learning rate   ###
-        decay_rate = 0.1
-        decay_steps = args.lrate_decay * 1000
-        new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = new_lrate
-        ################################
-
-        dt = time.time()-time0
-        print(f"Step: {global_step}, Loss: {loss}, Time: {dt}")
-        ####           end            #####
-
-        # Rest is logging
-        if i%args.i_weights==0:
-            path = os.path.join(basedir, expname, '{:06d}.tar'.format(i))
-            torch.save({
-                'global_step': global_step,
-                'i_train': i_train,
-                'i_holdout': i_holdout,
-                'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
-                'network_fine_state_dict': render_kwargs_train['network_fine'].state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-            }, path)
-            print('Saved checkpoints at', path)
-
-
-        if i%args.i_video==0 and i > 0:
-            # Turn on testing mode
-            with torch.no_grad():
-                rgbs, disps, uncerts, alphas = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
-            print('Done, saving', rgbs.shape, disps.shape)
-            moviebase = os.path.join(basedir, expname, 'spiral_{:06d}_'.format(i))
-            imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
-            imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
-            imageio.mimwrite(moviebase + 'uncert.mp4', to8b(uncerts / np.max(uncerts)), fps=30, quality=8)
-
-        if i%args.i_testset==0 and i > 0:
-            testsavedir = os.path.join(basedir, expname, 'testset_{:06d}'.format(i))
-            os.makedirs(testsavedir, exist_ok=True)
-            print('test poses shape', poses[i_test].shape)
-            with torch.no_grad():
-                render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
-            print('Saved test set')
-    
-        if i%args.i_print==0:
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
-
-        global_step += 1
-
-if __name__=='__main__':
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')
     parser = config_parser()
     args = parser.parse_args()
     train()
