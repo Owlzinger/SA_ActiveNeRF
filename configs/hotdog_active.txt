@@ -1,5 +1,5 @@
 expname = blender_paper_lego
-basedir = ./logs/lego_uncert_fullres
+basedir = ./runs/lego_uncert_fullres
 datadir = ./data/nerf_synthetic/lego
 dataset_type = blender
 

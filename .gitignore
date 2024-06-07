@@ -5,4 +5,4 @@ logs
 *.JPG
 .DS_Store
 data/nerf_llff_data/fern
-runs
+runs/

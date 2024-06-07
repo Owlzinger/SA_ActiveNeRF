@@ -2,7 +2,7 @@ import os, sys
 # os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 from datetime import datetime
-
+import pytz
 import numpy as np
 import imageio
 import json
@@ -23,6 +23,9 @@ import warnings
 
 from torch.utils.tensorboard import SummaryWriter
 
+from torchmetrics.functional import structural_similarity_index_measure
+from torchmetrics.image import PeakSignalNoiseRatio
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 warnings.filterwarnings('ignore')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -220,7 +223,7 @@ def create_nerf(args):
 
     start = 0
     basedir = args.basedir
-    expname = args.expname+time_str
+    expname = args.expname
 
     ##########################
 
@@ -470,7 +473,7 @@ def config_parser():
                         help='config file path')
     parser.add_argument("--expname", type=str, 
                         help='experiment name')
-    parser.add_argument("--basedir", type=str, default='./logs/', 
+    parser.add_argument("--basedir", type=str, default='./runs/', 
                         help='where to store ckpts and logs')
     parser.add_argument("--datadir", type=str, default='./data/fern', 
                         help='input data directory')
@@ -574,12 +577,14 @@ def config_parser():
     parser.add_argument("--beta_min",   type=float, default=0.01) # Minimun value for uncertainty
     parser.add_argument("--w",   type=float, default=0.01) # Strength for regularization as in Eq.(11)
     parser.add_argument("--ds_rate",   type=int, default=2) # Quality-efficiency trade-off factor as in Sec. 5.2
+    parser.add_argument("--isActive",   type=bool, default=True) # Flag to control the active learning process
 
     return parser
 
 
-def train():
-
+def train(isActive:bool):
+    getssim = structural_similarity_index_measure
+    getlpips = LearnedPerceptualImagePatchSimilarity(normalize=True)
     # Load data
 
     if args.dataset_type == 'llff':
@@ -640,7 +645,7 @@ def train():
 
     # Create log dir and copy the config file
     basedir = args.basedir
-    expname = args.expname+time_str
+    expname = args.expname
     os.makedirs(os.path.join(basedir, expname), exist_ok=True)
     f = os.path.join(basedir, expname, 'args.txt')
     with open(f, 'w') as file:
@@ -726,10 +731,8 @@ def train():
     print('VAL views are', i_val)
 
     start = start + 1
-    isActive=True
     i_holdout_list = [i_holdout[i:i + 20] for i in range(0, len(i_holdout), 20)]
     index_holdout = 0
-    writer = SummaryWriter()
 
     for i in trange(start, N_iters):
 
@@ -823,6 +826,8 @@ def train():
 
         loss = img_loss
         psnr = mse2psnr(img2mse(rgb, target_s))
+        ssim= getssim(rgb, target_s)
+        lpips = getlpips(rgb, target_s)
         trans = extras['raw'][..., -1]
 
         if 'rgb0' in extras:
@@ -874,25 +879,39 @@ def train():
             imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
             imageio.mimwrite(moviebase + 'uncert.mp4', to8b(uncerts / np.max(uncerts)), fps=30, quality=8)
  
-        if i%args.i_testset==0 and i > 0 and False:
-            testsavedir = os.path.join(basedir, expname, 'testset_{:06d}'.format(i))
+        if i%args.i_testset==0 and i > 0:
+            testsavedir = os.path.join(basedir, expname, 'testset_iter{:06d}'.format(i))
             os.makedirs(testsavedir, exist_ok=True)
             print('test poses shape', poses[i_test].shape)
             with torch.no_grad():
-                render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
+                rgb,_,uncerts,_=render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
             print('Saved test set')
+            target_s = images[i_test]
+            test_loss = img2mse(torch.from_numpy(rgb).to(device), target_s)
+            test_psnr = mse2psnr(img_loss)
+            test_ssim= getssim(rgb, target_s)
+            test_lpips = getlpips(rgb, target_s)
+            print(f"[TEST] Iter: {i} Loss: {test_loss.cpu().item()}  PSNR: {test_psnr.cpu().item()}")
+            writer.add_scalar('test_loss', test_loss.cpu().item(),global_step=i)
+            writer.add_scalar('test_psnr', test_psnr.cpu().item(),global_step=i)
+            writer.add_scalar('test_ssim', test_ssim.cpu().item(),global_step=i)
+            writer.add_scalar('test_lpips', test_lpips.cpu().item(),global_step=i)
+
+
         if i%args.i_print==0:
             tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.cpu().item()}  PSNR: {psnr.cpu().item()}")
 
             print(expname, i, psnr.cpu().item(), loss.cpu().item(), global_step)
             print('iter time {:.05f}'.format(dt))
 
-            writer.add_scalar('loss', loss.cpu().item(),global_step=i)
-            writer.add_scalar('psnr', psnr.cpu().item(),global_step=i)
+            writer.add_scalar('train_loss', loss.cpu().item(),global_step=i)
+            writer.add_scalar('train_psnr', psnr.cpu().item(),global_step=i)
+            writer.add_scalar('train_ssim', ssim.cpu().item(),global_step=i)
+            writer.add_scalar('train_lpips', lpips.cpu().item(),global_step=i)
 
             #tf.summary.histogram('tran', trans,step=i)
-            if args.N_importance > 0:
-                writer.add_scalar('psnr0', psnr0.cpu().item(),global_step=i)
+            # if args.N_importance > 0:
+            #     writer.add_scalar('psnr0', psnr0.cpu().item(),global_step=i)
 
         if i%args.i_img==0:
 
@@ -910,31 +929,48 @@ def train():
 
             evl_loss = evl_img_loss
             evl_psnr = mse2psnr(img2mse(rgb, target_s))
+            evl_ssim= getssim(rgb, target_s)
+            evl_lpips = getlpips(rgb, target_s)
+            
+            ####### Tensorboard Pytorch
+            rgb_img = to8b(rgb).unsqueeze(0)  # 添加批次维度
+            writer.add_image('rgb', rgb_img, global_step=i)
+            disp_img = disp.unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
+            writer.add_image('disp', disp_img, global_step=i)
 
-            # with writer.as_default():
-            #     #tf.summary.image('rgb', to8b(rgb)[tf.newaxis], step=i)
-            #     tf.summary.image('disp', disp[tf.newaxis,...,tf.newaxis], step=i)
-            #     tf.summary.image('acc', acc[tf.newaxis,...,tf.newaxis], step=i)
+            # For acc image
+            acc_img = acc.unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
+            writer.add_image('acc', acc_img, global_step=i)
 
-            #     writer.add_scalar('psnr_holdout', psnr.cpu().item(), step=i)
-            #     tf.summary.image('rgb_holdout', target[tf.newaxis], step=i)
-                #   if args.N_importance > 0:
+            # For psnr_holdout scalar
+            writer.add_scalar('psnr_holdout', psnr.cpu().item(), global_step=i)
 
-                #     with writer.as_default():
-                #         #tf.summary.image('rgb0', to8b(extras['rgb0'])[tf.newaxis], step=i)
-                #         tf.summary.image('disp0', extras['disp0'][tf.newaxis,...,tf.newaxis], step=i)
-                #         tf.summary.image('z_std', extras['z_std'][tf.newaxis,...,tf.newaxis], step=i)
-            print(expname,"[Evaluation] img_i: ", img_i, "val_PSNR: ",evl_psnr.cpu().item(), "val_loss",evl_loss.cpu().item(), global_step)
+            # For rgb_holdout image
+            target_img = target_s.unsqueeze(0)  # Adding batch dimension
+            writer.add_image('rgb_holdout', target_img, global_step=i)
+
+            if args.N_importance > 0:
+                # For disp0 image
+                disp0_img = extras['disp0'].unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
+                writer.add_image('disp0', disp0_img, global_step=i)
+
+                # For z_std image
+                z_std_img = extras['z_std'].unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
+                writer.add_image('z_std', z_std_img, global_step=i)
+        
+            print("[Evaluation] img_i: ", img_i, "evl_PSNR: ",evl_psnr.cpu().item(), "evl_loss",evl_loss.cpu().item(), global_step)
 
 
 
-            writer.add_scalar('val_loss', evl_loss.cpu().item(),global_step=i)
-            writer.add_scalar('val_psnr', evl_psnr.cpu().item(),global_step=i)
+            writer.add_scalar('evl_loss', evl_loss.cpu().item(),global_step=i)
+            writer.add_scalar('evl_psnr', evl_psnr.cpu().item(),global_step=i)
+            writer.add_scalar('evl_ssim', evl_ssim.cpu().item(),global_step=i)
+            writer.add_scalar('evl_lpips', evl_lpips.cpu().item(),global_step=i)
 
             # 将 loss 和 psnr 保存到文件中
             f = os.path.join(basedir, expname, 'evl_metric.txt')
             with open(f, 'a') as file:
-                file.write(str(i) + '\t' + str(loss.cpu().item()) + '\t' + str(psnr.cpu().item()) + '\n')
+                file.write(str(i) + '\t' + str(evl_loss.cpu().item()) + '\t' + str(evl_psnr.cpu().item()) + '\n')
             
 
 
@@ -943,14 +979,22 @@ def train():
 
 
 if __name__=='__main__':
-    from torch.cuda.amp import autocast, GradScaler
 
-    scaler = GradScaler()
     torch.set_default_tensor_type('torch.cuda.FloatTensor')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    current_time = datetime.now()
+    # autodl 服务器的时间是北京时间
+    tz_Berlin = pytz.timezone('Europe/Berlin')
+    current_time = datetime.now(tz_Berlin)
     time_str = current_time.strftime("%m%d_%H%M")
 
     parser = config_parser()
     args = parser.parse_args()
-    train()
+    args.isActive=False
+    args.choose_k = 5
+    args.expname = args.expname+time_str
+    args.init_image=20
+    args.i_testset = 1000
+
+    writer = SummaryWriter(os.path.join(args.basedir, args.expname))
+
+    train(args.isActive)
