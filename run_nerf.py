@@ -558,21 +558,21 @@ def config_parser():
                         help='will take every 1/N images as LLFF test set, paper uses 8')
 
     # logging/saving options
-    parser.add_argument("--i_print",   type=int, default=100, 
+    parser.add_argument("--i_print",   type=int, default=1000, 
                         help='frequency of console printout and metric loggin')
-    parser.add_argument("--i_img",     type=int, default=100, 
+    parser.add_argument("--i_img",     type=int, default=10000, 
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=10000, 
                         help='frequency of weight ckpt saving')
-    parser.add_argument("--i_testset", type=int, default=50000, 
+    parser.add_argument("--i_testset", type=int, default=25000, 
                         help='frequency of testset saving')
     parser.add_argument("--i_video",   type=int, default=50000, 
                         help='frequency of render_poses video saving')
 
     # configs for ActiveNeRF
-    parser.add_argument("--i_all",   type=int, default=5000) # Training iterations, 500000 for full-res nerfs
-    parser.add_argument('--active_iter', type=int, nargs='+', default=[1000,2000,3000,4000]) # Iterations for active learning
-    parser.add_argument("--init_image",   type=int, default=10) # initial number of images, only for llff dataset
+    parser.add_argument("--i_all",   type=int, default=100000) # Training iterations, 500000 for full-res nerfs
+    parser.add_argument('--active_iter', type=int, nargs='+', default=[20000,40000,60000,80000]) # Iterations for active learning
+    parser.add_argument("--init_image",   type=int, default=20) # initial number of images, only for llff dataset
     parser.add_argument("--choose_k",   type=int, default=4) # The number of new captured data for each active iter
     parser.add_argument("--beta_min",   type=float, default=0.01) # Minimun value for uncertainty
     parser.add_argument("--w",   type=float, default=0.01) # Strength for regularization as in Eq.(11)
@@ -989,11 +989,10 @@ if __name__=='__main__':
 
     parser = config_parser()
     args = parser.parse_args()
-    args.isActive=False
+    args.isActive=True
     args.choose_k = 5
     args.expname = args.expname+time_str
     args.init_image=20
-    args.i_testset = 1000
 
     writer = SummaryWriter(os.path.join(args.basedir, args.expname))
 
