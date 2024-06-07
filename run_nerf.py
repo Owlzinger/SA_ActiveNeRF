@@ -583,8 +583,7 @@ def config_parser():
 
 
 def train(isActive:bool):
-    getssim = structural_similarity_index_measure
-    getlpips = LearnedPerceptualImagePatchSimilarity(normalize=True)
+
     # Load data
 
     if args.dataset_type == 'llff':
@@ -826,9 +825,8 @@ def train(isActive:bool):
 
         loss = img_loss
         psnr = mse2psnr(img2mse(rgb, target_s))
-        ssim= getssim(rgb, target_s)
-        lpips = getlpips(rgb, target_s)
-        trans = extras['raw'][..., -1]
+
+        # trans = extras['raw'][..., -1]
 
         if 'rgb0' in extras:
             img_loss0 = img2mse(extras['rgb0'], target_s)
@@ -889,13 +887,11 @@ def train(isActive:bool):
             target_s = images[i_test]
             test_loss = img2mse(torch.from_numpy(rgb).to(device), target_s)
             test_psnr = mse2psnr(img_loss)
-            test_ssim= getssim(rgb, target_s)
-            test_lpips = getlpips(rgb, target_s)
+
             print(f"[TEST] Iter: {i} Loss: {test_loss.cpu().item()}  PSNR: {test_psnr.cpu().item()}")
             writer.add_scalar('test_loss', test_loss.cpu().item(),global_step=i)
             writer.add_scalar('test_psnr', test_psnr.cpu().item(),global_step=i)
-            writer.add_scalar('test_ssim', test_ssim.cpu().item(),global_step=i)
-            writer.add_scalar('test_lpips', test_lpips.cpu().item(),global_step=i)
+
 
 
         if i%args.i_print==0:
@@ -906,8 +902,7 @@ def train(isActive:bool):
 
             writer.add_scalar('train_loss', loss.cpu().item(),global_step=i)
             writer.add_scalar('train_psnr', psnr.cpu().item(),global_step=i)
-            writer.add_scalar('train_ssim', ssim.cpu().item(),global_step=i)
-            writer.add_scalar('train_lpips', lpips.cpu().item(),global_step=i)
+
 
             #tf.summary.histogram('tran', trans,step=i)
             # if args.N_importance > 0:
@@ -929,43 +924,41 @@ def train(isActive:bool):
 
             evl_loss = evl_img_loss
             evl_psnr = mse2psnr(img2mse(rgb, target_s))
-            evl_ssim= getssim(rgb, target_s)
-            evl_lpips = getlpips(rgb, target_s)
+
             
-            ####### Tensorboard Pytorch
-            rgb_img = to8b(rgb).unsqueeze(0)  # 添加批次维度
-            writer.add_image('rgb', rgb_img, global_step=i)
-            disp_img = disp.unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
-            writer.add_image('disp', disp_img, global_step=i)
+# """             ####### Tensorboard Pytorch
+#             rgb_img = to8b(rgb).unsqueeze(0)  # 添加批次维度
+#             writer.add_image('rgb', rgb_img, global_step=i)
+#             disp_img = disp.unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
+#             writer.add_image('disp', disp_img, global_step=i)
 
-            # For acc image
-            acc_img = acc.unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
-            writer.add_image('acc', acc_img, global_step=i)
+#             # For acc image
+#             acc_img = acc.unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
+#             writer.add_image('acc', acc_img, global_step=i)
 
-            # For psnr_holdout scalar
-            writer.add_scalar('psnr_holdout', psnr.cpu().item(), global_step=i)
+#             # For psnr_holdout scalar
+#             writer.add_scalar('psnr_holdout', psnr.cpu().item(), global_step=i)
 
-            # For rgb_holdout image
-            target_img = target_s.unsqueeze(0)  # Adding batch dimension
-            writer.add_image('rgb_holdout', target_img, global_step=i)
+#             # For rgb_holdout image
+#             target_img = target_s.unsqueeze(0)  # Adding batch dimension
+#             writer.add_image('rgb_holdout', target_img, global_step=i)
 
-            if args.N_importance > 0:
-                # For disp0 image
-                disp0_img = extras['disp0'].unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
-                writer.add_image('disp0', disp0_img, global_step=i)
+#             if args.N_importance > 0:
+#                 # For disp0 image
+#                 disp0_img = extras['disp0'].unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
+#                 writer.add_image('disp0', disp0_img, global_step=i)
 
-                # For z_std image
-                z_std_img = extras['z_std'].unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
-                writer.add_image('z_std', z_std_img, global_step=i)
-        
+#                 # For z_std image
+#                 z_std_img = extras['z_std'].unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
+#                 writer.add_image('z_std', z_std_img, global_step=i)
+#          """
             print("[Evaluation] img_i: ", img_i, "evl_PSNR: ",evl_psnr.cpu().item(), "evl_loss",evl_loss.cpu().item(), global_step)
 
 
 
             writer.add_scalar('evl_loss', evl_loss.cpu().item(),global_step=i)
             writer.add_scalar('evl_psnr', evl_psnr.cpu().item(),global_step=i)
-            writer.add_scalar('evl_ssim', evl_ssim.cpu().item(),global_step=i)
-            writer.add_scalar('evl_lpips', evl_lpips.cpu().item(),global_step=i)
+     
 
             # 将 loss 和 psnr 保存到文件中
             f = os.path.join(basedir, expname, 'evl_metric.txt')
