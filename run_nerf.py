@@ -560,18 +560,18 @@ def config_parser():
     # logging/saving options
     parser.add_argument("--i_print",   type=int, default=1000, 
                         help='frequency of console printout and metric loggin')
-    parser.add_argument("--i_img",     type=int, default=10000, 
+    parser.add_argument("--i_img",     type=int, default=1000, 
                         help='frequency of tensorboard image logging')
-    parser.add_argument("--i_weights", type=int, default=10000, 
+    parser.add_argument("--i_weights", type=int, default=1000, 
                         help='frequency of weight ckpt saving')
-    parser.add_argument("--i_testset", type=int, default=25000, 
+    parser.add_argument("--i_testset", type=int, default=2500, 
                         help='frequency of testset saving')
     parser.add_argument("--i_video",   type=int, default=50000, 
                         help='frequency of render_poses video saving')
 
     # configs for ActiveNeRF
-    parser.add_argument("--i_all",   type=int, default=100000) # Training iterations, 500000 for full-res nerfs
-    parser.add_argument('--active_iter', type=int, nargs='+', default=[20000,40000,60000,80000]) # Iterations for active learning
+    parser.add_argument("--i_all",   type=int, default=10000) # Training iterations, 500000 for full-res nerfs
+    parser.add_argument('--active_iter', type=int, nargs='+', default=[2000,4000,6000,8000]) # Iterations for active learning
     parser.add_argument("--init_image",   type=int, default=20) # initial number of images, only for llff dataset
     parser.add_argument("--choose_k",   type=int, default=4) # The number of new captured data for each active iter
     parser.add_argument("--beta_min",   type=float, default=0.01) # Minimun value for uncertainty
@@ -771,6 +771,7 @@ def train(isActive:bool):
                     indices = np.arange(len(rays_rgb_train))
                     np.random.shuffle(indices)
                     rays_rgb_train = rays_rgb_train[indices]
+                    print('done, shuffle rays')
 
                     f = os.path.join(basedir, expname, 'args.txt')
                     with open(f, 'a') as file:
@@ -846,7 +847,7 @@ def train(isActive:bool):
         ################################
 
         dt = time.time()-time0
-        print("Step: {}, Loss: {:.5}, Time: {}, PSNR: {:.5}".format(global_step,loss.item(),dt,psnr.item()))
+        # print("Step: {}, Loss: {:.5}, Time: {}, PSNR: {:.5}".format(global_step,loss.item(),dt,psnr.item()))
         ####           end            #####
         # 将 loss 和 psnr 保存到文件中
         e = os.path.join(basedir, expname, 'train_metric.txt')
@@ -896,7 +897,6 @@ def train(isActive:bool):
 
         if i%args.i_print==0:
             tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.cpu().item()}  PSNR: {psnr.cpu().item()}")
-
             print(expname, i, psnr.cpu().item(), loss.cpu().item(), global_step)
             print('iter time {:.05f}'.format(dt))
 
@@ -982,11 +982,11 @@ if __name__=='__main__':
 
     parser = config_parser()
     args = parser.parse_args()
-    args.isActive=True
+    args.isActive=False
     args.choose_k = 5
     args.expname = args.expname+time_str
     args.init_image=20
-
+    
     writer = SummaryWriter(os.path.join(args.basedir, args.expname))
 
     train(args.isActive)
