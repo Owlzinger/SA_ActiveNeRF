@@ -570,10 +570,10 @@ def config_parser():
                         help='frequency of render_poses video saving')
 
     # configs for ActiveNeRF
-    parser.add_argument("--i_all",   type=int, default=100000) # Training iterations, 500000 for full-res nerfs
-    parser.add_argument('--active_iter', type=int, nargs='+', default=[20000,40000,60000,80000]) # Iterations for active learning
+    parser.add_argument("--i_all",   type=int, default=16500) # Training iterations, 500000 for full-res nerfs
+    parser.add_argument('--active_iter', type=int, nargs='+', default=[4000,8000,12000,16000]) # Iterations for active learning
     parser.add_argument("--init_image",   type=int, default=20) # initial number of images, only for llff dataset
-    parser.add_argument("--choose_k",   type=int, default=4) # The number of new captured data for each active iter
+    parser.add_argument("--choose_k",   type=int, default=5) # The number of new captured data for each active iter
     parser.add_argument("--beta_min",   type=float, default=0.01) # Minimun value for uncertainty
     parser.add_argument("--w",   type=float, default=0.01) # Strength for regularization as in Eq.(11)
     parser.add_argument("--ds_rate",   type=int, default=2) # Quality-efficiency trade-off factor as in Sec. 5.2
@@ -827,6 +827,7 @@ def train(isActive:bool):
         loss = img_loss
         psnr = mse2psnr(img2mse(rgb, target_s))
 
+
         # trans = extras['raw'][..., -1]
 
         if 'rgb0' in extras:
@@ -868,37 +869,35 @@ def train(isActive:bool):
             }, path)
             print('Saved checkpoints at', path)
 
-        if i%args.i_video==0 and i > 0 and False:
-            # Turn on testing mode
-            with torch.no_grad():
-                rgbs, disps, uncerts, alphas = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
-            print('Done, saving', rgbs.shape, disps.shape)
-            moviebase = os.path.join(basedir, expname, 'spiral_{:06d}_'.format(i))
-            imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
-            imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
-            imageio.mimwrite(moviebase + 'uncert.mp4', to8b(uncerts / np.max(uncerts)), fps=30, quality=8)
- 
-        if i%args.i_testset==0 and i > 0:
-            testsavedir = os.path.join(basedir, expname, 'testset_iter{:06d}'.format(i))
-            os.makedirs(testsavedir, exist_ok=True)
-            print('test poses shape', poses[i_test].shape)
-            with torch.no_grad():
-                rgb,_,uncerts,_=render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
-            print('Saved test set')
-            target_s = images[i_test]
-            test_loss = img2mse(torch.from_numpy(rgb).to(device), target_s)
-            test_psnr = mse2psnr(img_loss)
-
-            print(f"[TEST] Iter: {i} Loss: {test_loss.cpu().item()}  PSNR: {test_psnr.cpu().item()}")
-            writer.add_scalar('test_loss', test_loss.cpu().item(),global_step=i)
-            writer.add_scalar('test_psnr', test_psnr.cpu().item(),global_step=i)
-
-
+        # if i%args.i_video==0 and i > 0 and False:
+        #     # Turn on testing mode
+        #     with torch.no_grad():
+        #         rgbs, disps, uncerts, alphas = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
+        #     print('Done, saving', rgbs.shape, disps.shape)
+        #     moviebase = os.path.join(basedir, expname, 'spiral_{:06d}_'.format(i))
+        #     imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
+        #     imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
+        #     imageio.mimwrite(moviebase + 'uncert.mp4', to8b(uncerts / np.max(uncerts)), fps=30, quality=8)
+        #
+        # if i%args.i_testset==0 and i > 0:
+        #     testsavedir = os.path.join(basedir, expname, 'testset_iter{:06d}'.format(i))
+        #     os.makedirs(testsavedir, exist_ok=True)
+        #     print('test poses shape', poses[i_test].shape)
+        #     with torch.no_grad():
+        #         rgb,_,uncerts,_=render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
+        #     print('Saved test set')
+        #     target_s = images[i_test]
+        #     test_loss = img2mse(torch.from_numpy(rgb).to(device), target_s)
+        #     test_psnr = mse2psnr(img_loss)
+        #
+        #     print(f"[TEST] Iter: {i} Loss: {test_loss.cpu().item()}  PSNR: {test_psnr.cpu().item()}")
+        #     writer.add_scalar('test_loss', test_loss.cpu().item(),global_step=i)
+        #     writer.add_scalar('test_psnr', test_psnr.cpu().item(),global_step=i)
 
         if i%args.i_print==0:
             tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.cpu().item()}  PSNR: {psnr.cpu().item()}")
-            print(expname, i, psnr.cpu().item(), loss.cpu().item(), global_step)
-            print('iter time {:.05f}'.format(dt))
+            #print(expname, i, psnr.cpu().item(), loss.cpu().item(), global_step)
+            # print('iter time {:.05f}'.format(dt))
 
             writer.add_scalar('train_loss', loss.cpu().item(),global_step=i)
             writer.add_scalar('train_psnr', psnr.cpu().item(),global_step=i)
@@ -924,9 +923,17 @@ def train(isActive:bool):
 
             evl_loss = evl_img_loss
             evl_psnr = mse2psnr(img2mse(rgb, target_s))
+            # print("[Evaluation] img_i: ", img_i, "evl_PSNR: ",evl_psnr.cpu().item(), "evl_loss",evl_loss.cpu().item(), global_step)
 
-            
-# """             ####### Tensorboard Pytorch
+            writer.add_scalar('evl_loss', evl_loss.cpu().item(), global_step=i)
+            writer.add_scalar('evl_psnr', evl_psnr.cpu().item(), global_step=i)
+
+            # 将 loss 和 psnr 保存到文件中
+            f = os.path.join(basedir, expname, 'evl_metric.txt')
+            with open(f, 'a') as file:
+                file.write(str(i) + '\t' + str(evl_loss.cpu().item()) + '\t' + str(evl_psnr.cpu().item()) + '\n')
+
+        # """             ####### Tensorboard Pytorch
 #             rgb_img = to8b(rgb).unsqueeze(0)  # 添加批次维度
 #             writer.add_image('rgb', rgb_img, global_step=i)
 #             disp_img = disp.unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
@@ -952,22 +959,11 @@ def train(isActive:bool):
 #                 z_std_img = extras['z_std'].unsqueeze(0).unsqueeze(0)  # Adding batch and channel dimensions
 #                 writer.add_image('z_std', z_std_img, global_step=i)
 #          """
-            print("[Evaluation] img_i: ", img_i, "evl_PSNR: ",evl_psnr.cpu().item(), "evl_loss",evl_loss.cpu().item(), global_step)
-
-
-
-            writer.add_scalar('evl_loss', evl_loss.cpu().item(),global_step=i)
-            writer.add_scalar('evl_psnr', evl_psnr.cpu().item(),global_step=i)
-     
-
-            # 将 loss 和 psnr 保存到文件中
-            f = os.path.join(basedir, expname, 'evl_metric.txt')
-            with open(f, 'a') as file:
-                file.write(str(i) + '\t' + str(evl_loss.cpu().item()) + '\t' + str(evl_psnr.cpu().item()) + '\n')
-            
 
 
         global_step += 1
+        print(global_step, end='', flush=True)
+
     writer.close()
 
 
