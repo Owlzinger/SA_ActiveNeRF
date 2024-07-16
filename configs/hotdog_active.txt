@@ -1,6 +1,6 @@
 expname = blender_paper_lego
 basedir = ./runs/lego_uncert_fullres
-datadir = ./data/nerf_synthetic/lego
+datadir = ./data/nerf_synthetic/hotdog
 dataset_type = blender
 
 use_viewdirs = True
