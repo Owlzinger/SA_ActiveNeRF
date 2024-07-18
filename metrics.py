@@ -42,6 +42,10 @@ class SSIM(object):
         return ssim, larger the better
         """
         # Value range can be different from 255. Other common ranges are 1 (sigmoid) and 2 (tanh).
+        y_pred = y_pred.unsqueeze(0)
+        y_pred= y_pred.permute(0, 3, 1,2)
+        y_true = y_true.unsqueeze(0)
+        y_true = y_true.permute(0, 3, 1, 2)
         if torch.max(y_pred) > 128:
             max_val = 255
         else:
@@ -54,7 +58,7 @@ class SSIM(object):
         L = max_val - min_val
 
         padd = 0
-        (_, channel, height, width) = y_pred.size()
+        (_,channel,height, width) = y_pred.size()
         window = self.create_window(w_size, channel=channel).to(y_pred.device)
 
         mu1 = F.conv2d(y_pred, window, padding=padd, groups=channel)
@@ -101,6 +105,10 @@ class LPIPS(object):
             normalized : change [0,1] => [-1,1] (default by LPIPS)
         return LPIPS, smaller the better
         """
+        y_pred = y_pred.unsqueeze(0)
+        y_pred= y_pred.permute(0, 3, 1,2)
+        y_true = y_true.unsqueeze(0)
+        y_true = y_true.permute(0, 3, 1, 2)
         if normalized:
             y_pred = y_pred * 2.0 - 1.0
             y_true = y_true * 2.0 - 1.0
@@ -128,8 +136,6 @@ def read_images_in_dir(imgs_dir):
 
 def estim_error(estim, gt):
     errors = dict()
-    metric = MSE()
-    errors["mse"] = metric(estim, gt).item()
     metric = PSNR()
     errors["psnr"] = metric(estim, gt).item()
     metric = SSIM()
@@ -144,16 +150,17 @@ def save_error(errors, save_dir):
     f = open(save_path, "w")
     f.write(str(errors))
     f.close()
-gt_dir = "./data/nerf_synthetic/lego"
-estim_dir ="./runs/active_lego0626_1214_isActiveTrue"
-output_dir = "./runs"
+if __name__ == "__main__":
+    gt_dir = "./data/blender/lego"
+    estim_dir ="./runs/active_lego0626_1214_isActiveTrue"
+    output_dir = "./runs"
 
-estim = read_images_in_dir(estim_dir)
-gt = read_images_in_dir(gt_dir)
+    estim = read_images_in_dir(estim_dir)
+    gt = read_images_in_dir(gt_dir)
 
-estim = torch.Tensor(estim).cuda()
-gt = torch.Tensor(gt).cuda()
+    estim = torch.Tensor(estim).cuda()
+    gt = torch.Tensor(gt).cuda()
 
-errors = estim_error(estim, gt)
-save_error(errors, output_dir)
-print(errors)
+    errors = estim_error(estim, gt)
+    save_error(errors, output_dir)
+    print(errors)
