@@ -827,6 +827,7 @@ def train(isActive:bool):
         loss = img_loss
         psnr = mse2psnr(img2mse(rgb, target_s))
 
+
         # trans = extras['raw'][..., -1]
 
         if 'rgb0' in extras:
@@ -892,8 +893,6 @@ def train(isActive:bool):
             print(f"[TEST] Iter: {i} Loss: {test_loss.cpu().item()}  PSNR: {test_psnr.cpu().item()}")
             writer.add_scalar('test_loss', test_loss.cpu().item(),global_step=i)
             writer.add_scalar('test_psnr', test_psnr.cpu().item(),global_step=i)
-
-
 
         if i%args.i_print==0:
             tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.cpu().item()}  PSNR: {psnr.cpu().item()}")
